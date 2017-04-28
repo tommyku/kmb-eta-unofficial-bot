@@ -145,6 +145,7 @@ Telegram::Bot::Client.run(ENV['TELEGRAM_BOT_TOKEN']) do |bot|
         command, param = parse_command(message.data)
         response = handle_eta(param)
         @bot.api.send_message(chat_id: message.from.id, text: response) if response
+        @bot.api.answerCallbackQuery(callback_query_id: message.id)
       end
     when Telegram::Bot::Types::Message
       if is_command?(message)
