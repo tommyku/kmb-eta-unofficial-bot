@@ -1,1 +1,1 @@
-docker run --restart=always -d -v $(pwd):/app telegram-bot-starter
+docker run --restart=always -d -v $(pwd):/app kmb-eta-unofficial-bot
