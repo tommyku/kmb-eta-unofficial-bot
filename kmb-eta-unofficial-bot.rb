@@ -13,17 +13,17 @@ def handle_command(message)
   when /\/start/i, /\/help/i
     @bot.api.send_message(chat_id: message.chat.id, text: help_message)
   when /\/route/i
-    response = handle_route(param)
+    response = param ? handle_route(param) : 'give me a route number'
     @bot.api.send_message(chat_id: message.chat.id, text: response) if response
   when /\/stops/i
-    response = handle_stop(param)
+    response = param ? handle_stop(param) : 'give me a route number'
     if response.is_a?(Telegram::Bot::Types::InlineKeyboardMarkup)
       @bot.api.send_message(chat_id: message.chat.id, text: 'Which stop?', reply_markup: response)
-    else
+    elsif response.is_a?(String)
       @bot.api.send_message(chat_id: message.chat.id, text: response)
     end
   when /\/eta/i
-    response = handle_eta(param)
+    response = param ? handle_eta(param) : 'try running /stops if you donno what you are doing'
     @bot.api.send_message(chat_id: message.chat.id, text: response) if response
   end
 end
@@ -70,7 +70,7 @@ def handle_stop(param)
       basic_info = kmbGetStops.basic_info
       kb = []
       route_stops.each do |stop|
-        text = "#{basic_info['OriCName']} 去 #{stop['CName']}"
+        text = "#{stop['CName']} 去 #{basic_info['DestCName']}"
         eta_command = "eta #{route} #{stop['BSICode'].gsub('-', '')} #{bound}"
         kb.push Telegram::Bot::Types::InlineKeyboardButton.new(text: text, callback_data: eta_command)
       end
