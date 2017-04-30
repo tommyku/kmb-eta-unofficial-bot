@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 require 'telegram/bot'
 require 'envyable'
+require 'awesome_print'
 require_relative 'kmb/get_stops.rb'
 require_relative 'kmb/get_eta.rb'
 
@@ -11,19 +12,24 @@ def handle_command(message)
   command, param = parse_command(message.text)
   case command
   when /\/start/i, /\/help/i
-    @bot.api.send_message(chat_id: message.chat.id, text: help_message)
-  when /\/route/i
-    response = param ? handle_route(param) : 'give me a route number'
-    @bot.api.send_message(chat_id: message.chat.id, text: response) if response
-  when /\/stops/i
-    response = param ? handle_stop(param) : 'give me a route number'
-    if response.is_a?(Telegram::Bot::Types::InlineKeyboardMarkup)
-      @bot.api.send_message(chat_id: message.chat.id, text: 'Which stop?', reply_markup: response)
-    elsif response.is_a?(String)
-      @bot.api.send_message(chat_id: message.chat.id, text: response)
+    response = command_handler do
+      help_message
     end
+    respond_with(message.chat.id, response)
+  when /\/route/i
+    response = command_handler(param, 1, [/^[a-z0-9]+$/i], 'give me a route number like /route 91m') do |params|
+      handle_route(params)
+    end
+    @bot.api.send_message(chat_id: message.chat.id, text: response)
+  when /\/stops/i
+    response = command_handler(param, 1, [/^[a-z0-9]+$/i], 'give me a route number like /stops 91m') do |params|
+      handle_stop(params)
+    end
+    respond_with(message.chat.id, response, 'which stop?')
   when /\/eta/i
-    response = param ? handle_eta(param) : 'try running /stops if you donno what you are doing'
+    response = command_handler(param, 2, [/^[a-z0-9]+$/i, nil], 'try running /stops if you donno what you are doing') do |params|
+      handle_eta(params)
+    end
     @bot.api.send_message(chat_id: message.chat.id, text: response) if response
   end
 end
@@ -41,89 +47,78 @@ def is_command?(message)
   false
 end
 
+def command_handler(param = nil, params_count = 0, param_regexp = [], default_response = 'something is wrong', &block)
+  params = (param || '').split(' ')
+  param_ok = params.length >= params_count
+  params.each_with_index do |p, i|
+    if param_regexp[i] && !(p =~ param_regexp[i])
+      param_ok = false
+    end
+  end
+  if block && param_ok
+    block.call(params)
+  else
+    default_response
+  end
+end
+
+def respond_with(chat_id, response = 'something is wrong', extra = nil)
+  case response
+  when String
+    @bot.api.send_message(chat_id: chat_id, text: response)
+  when Telegram::Bot::Types::InlineKeyboardMarkup
+    @bot.api.send_message(chat_id: chat_id, text: extra, reply_markup: response)
+  end
+end
+
 def handle_message(message)
   # pass
 end
 
-def handle_route(param)
-  route = param
-  if route =~ /^[a-z0-9]+$/i
-    kmbGetStops = Kmb::GetStops.new(route, '1')
-    if basic_info = kmbGetStops.basic_info
-      orig = basic_info['OriCName']
-      dest = basic_info['DestCName']
-      "if you are going from #{dest} to #{orig}, add '2' when you call /stops or /eta, otherwise, there is no need to add '2'"
-    else
-      'wait something is wrong'
-    end
+def handle_route(params)
+  route = params[0]
+  kmbGetStops = Kmb::GetStops.new(route, '1')
+  if basic_info = kmbGetStops.basic_info
+    orig = basic_info['OriCName']
+    dest = basic_info['DestCName']
+    "So you are going from #{orig} to #{dest}? Otherwise, add '2' at the end of your command like /stops 91m 2"
   else
-    'are you sure this is a route?'
+    'wait something is wrong'
   end
 end
 
 def handle_stop(param)
-  route, bound = param.split(' ', 2)
+  route, bound = param
   bound ||= '1'
-  if route =~ /^[a-z0-9]+$/i
-    kmbGetStops = Kmb::GetStops.new(route, bound)
-    if route_stops = kmbGetStops.route_stops
-      basic_info = kmbGetStops.basic_info
-      kb = []
-      route_stops.each do |stop|
-        text = "#{stop['CName']} 去 #{basic_info['DestCName']}"
-        eta_command = "eta #{route} #{stop['BSICode'].gsub('-', '')} #{bound}"
-        kb.push Telegram::Bot::Types::InlineKeyboardButton.new(text: text, callback_data: eta_command)
-      end
-      markup = Telegram::Bot::Types::InlineKeyboardMarkup.new(inline_keyboard: kb)
-      markup
-    else
-      'wait something is wrong'
+  kmbGetStops = Kmb::GetStops.new(route, bound)
+  if route_stops = kmbGetStops.route_stops
+    basic_info = kmbGetStops.basic_info
+    kb = []
+    route_stops.each do |stop|
+      text = "#{stop['CName']} 去 #{basic_info['DestCName']}"
+      eta_command = "eta #{route} #{stop['BSICode'].gsub('-', '')} #{bound}"
+      kb.push Telegram::Bot::Types::InlineKeyboardButton.new(text: text, callback_data: eta_command)
     end
+    markup = Telegram::Bot::Types::InlineKeyboardMarkup.new(inline_keyboard: kb)
+    markup
   else
-    'are you sure this is a route?'
-  end
-end
-
-
-def handle_stop_old(param)
-  route, bound = param.split(' ', 2)
-  bound ||= '1'
-  if route =~ /^[a-z0-9]+$/i
-    kmbGetStops = Kmb::GetStops.new(route, bound)
-    if route_stops = kmbGetStops.route_stops
-      response = "To see the ETA to these stations, use these code\n"
-      route_stops.each do |stop|
-        response += "#{stop['CName']} #{stop['BSICode'].gsub('-', '')}\n"
-      end
-      eta_command = "/eta #{route} #{route_stops[0]['BSICode'].gsub('-', '')}"
-      eta_command += bound == '1' ? '' : ' 2'
-      response += "If you want to know the ETA to #{route_stops[0]['CName']}, type '#{eta_command}'"
-      response
-    else
-      'wait something is wrong'
-    end
-  else
-    'are you sure this is a route?'
+    'wait something is wrong'
   end
 end
 
 def handle_eta(param)
-  route, bsi, bound = param.split(' ', 3)
+  route, bsi, bound = param
   bound ||= '1'
-  if route =~ /^[a-z0-9]+$/i
-    kmbGetEta= Kmb::GetETA.new(route, bound, bsi)
-    if eta = kmbGetEta.eta
-      response = "Eta to this stop is:\n"
-      eta.each do |e|
-        response += "#{e['t']}\n"
-      end
-      response += eta.empty? ? 'No data' : ''
-      response
-    else
-      'wait something is wrong'
+  kmbGetEta= Kmb::GetETA.new(route, bound, bsi)
+  if eta = kmbGetEta.eta
+    response = "Eta to this stop is:\n"
+    eta.each do |e|
+      response += "#{e['t']}\n"
     end
+    response += eta.empty? ? 'No data' : ''
+    response
   else
-    'are you sure this is a route?'
+    'wait something is wrong'
   end
 end
 
@@ -143,7 +138,7 @@ Telegram::Bot::Client.run(ENV['TELEGRAM_BOT_TOKEN']) do |bot|
     when Telegram::Bot::Types::CallbackQuery
       if message.data =~ /^eta [a-zA-Z0-9]+ [A-Z0-9]+ [1|2]$/
         command, param = parse_command(message.data)
-        response = handle_eta(param)
+        response = handle_eta(param.split(' ', 3))
         @bot.api.send_message(chat_id: message.from.id, text: response) if response
         @bot.api.answerCallbackQuery(callback_query_id: message.id)
       end
