@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 require 'telegram/bot'
 require 'envyable'
+require 'awesome_print'
 require_relative 'kmb/get_stops.rb'
 require_relative 'kmb/get_eta.rb'
 
@@ -133,7 +134,7 @@ end
 Telegram::Bot::Client.run(ENV['TELEGRAM_BOT_TOKEN']) do |bot|
   @bot = bot
   @bot.listen do |message|
-    if ENV['VERIFIED_USERS'].include?(message.from.username)
+    if message.from.username && ENV['VERIFIED_USERS'].include?(message.from.username)
       case message
       when Telegram::Bot::Types::CallbackQuery
         if message.data =~ /^eta [a-zA-Z0-9]+ [A-Z0-9]+ [1|2]$/
@@ -149,8 +150,6 @@ Telegram::Bot::Client.run(ENV['TELEGRAM_BOT_TOKEN']) do |bot|
           handle_message(message)
         end
       end
-    else
-      @bot.api.send_message(chat_id: message.from.id, text: 'your prayer is not heard')
     end
   end
 end
